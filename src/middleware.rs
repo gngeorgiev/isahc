@@ -54,12 +54,12 @@ pub fn create(
 /// in parallel.
 pub trait Middleware: Send + Sync + 'static {
     /// Transform a request before it is sent.
-    fn filter_request(&self, request: Request<Body>) -> Request<Body> {
+    fn filter_request<'b>(&self, request: Request<Body<'b>>) -> Request<Body<'b>> {
         request
     }
 
     /// Transform a response after it is received.
-    fn filter_response(&self, response: Response<Body>) -> Response<Body> {
+    fn filter_response(&self, response: Response<Body<'static>>) -> Response<Body<'static>> {
         response
     }
 }

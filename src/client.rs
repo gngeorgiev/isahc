@@ -589,7 +589,7 @@ impl HttpClient {
     /// let response = client.send_async(request).await?;
     /// assert!(response.status().is_success());
     /// ```
-    pub fn send_async<B: Into<Body>>(&self, request: Request<B>) -> ResponseFuture<'_> {
+    pub fn send_async<'b, B: Into<Body<'b>>>(&self, request: Request<B>) -> ResponseFuture<'_, 'b> {
         let mut request = request.map(Into::into);
 
         // Set default user agent if not specified.
@@ -612,11 +612,11 @@ impl HttpClient {
         }
     }
 
-    fn send_builder_async(
+    fn send_builder_async<'b>(
         &self,
         mut builder: http::request::Builder,
-        body: impl Into<Body>,
-    ) -> ResponseFuture<'_> {
+        body: impl Into<Body<'b>>,
+    ) -> ResponseFuture<'_, 'b> {
         match builder.body(body.into()) {
             Ok(request) => self.send_async(request),
             Err(e) => ResponseFuture {
@@ -628,9 +628,9 @@ impl HttpClient {
         }
     }
 
-    fn create_easy_handle(
+    fn create_easy_handle<'b>(
         &self,
-        request: Request<Body>,
+        request: Request<Body<'b>>,
     ) -> Result<(curl::easy::Easy2<RequestHandler>, RequestHandlerFuture), Error> {
         // Prepare the request plumbing.
         let (mut parts, body) = request.into_parts();
@@ -884,18 +884,18 @@ impl EasyExt for curl::easy::Easy2<RequestHandler> {
 
 /// A future for a request being executed.
 #[derive(Debug)]
-pub struct ResponseFuture<'c> {
+pub struct ResponseFuture<'c, 'b> {
     /// The client this future is associated with.
     client: &'c HttpClient,
     /// A pre-filled error to return.
     error: Option<Error>,
     /// The request to send.
-    request: Option<Request<Body>>,
+    request: Option<Request<Body<'b>>>,
     /// The inner future for actual execution.
     inner: Option<RequestHandlerFuture>,
 }
 
-impl<'c> ResponseFuture<'c> {
+impl<'c, 'b> ResponseFuture<'c, 'b> {
     fn maybe_initialize(&mut self) -> Result<(), Error> {
         // If the future has a pre-filled error, return that.
         if let Some(e) = self.error.take() {
@@ -919,7 +919,7 @@ impl<'c> ResponseFuture<'c> {
     fn complete(
         &self,
         result: Result<Response<ResponseBodyReader>, Error>,
-    ) -> Result<Response<Body>, Error> {
+    ) -> Result<Response<Body<'static>>, Error> {
         result.map(|response| {
             // Convert the reader into an opaque Body.
             let mut response = response.map(|reader| {
@@ -948,7 +948,7 @@ impl<'c> ResponseFuture<'c> {
 
     /// Block the current thread until the request is completed or aborted. This
     /// effectively turns the asynchronous request into a synchronous one.
-    fn join(mut self) -> Result<Response<Body>, Error> {
+    fn join(mut self) -> Result<Response<Body<'static>>, Error> {
         self.maybe_initialize()?;
 
         if let Some(inner) = self.inner.take() {
@@ -959,8 +959,8 @@ impl<'c> ResponseFuture<'c> {
     }
 }
 
-impl Future for ResponseFuture<'_> {
-    type Output = Result<Response<Body>, Error>;
+impl<'b> Future for ResponseFuture<'_, 'b> {
+    type Output = Result<Response<Body<'static>>, Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.maybe_initialize()?;

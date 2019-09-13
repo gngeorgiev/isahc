@@ -33,7 +33,7 @@ use std::task::{Context, Poll, Waker};
 ///
 /// If dropped before the response is finished, the associated future will be
 /// completed with an `Aborted` error.
-pub(crate) struct RequestHandler {
+pub(crate) struct RequestHandler<'b> {
     /// State shared by the handler and its future.
     shared: Arc<Shared>,
 
@@ -41,7 +41,7 @@ pub(crate) struct RequestHandler {
     sender: Option<Sender<Result<http::response::Builder, Error>>>,
 
     /// The body to be sent in the request.
-    request_body: Body,
+    request_body: Body<'b>,
 
     /// A waker used with reading the request body asynchronously. Populated by
     /// an agent when the request is initialized.
@@ -98,9 +98,9 @@ struct Shared {
     response_body_dropped: AtomicCell<bool>,
 }
 
-impl RequestHandler {
+impl<'b> RequestHandler<'b> {
     /// Create a new request handler and an associated response future.
-    pub(crate) fn new(request_body: Body) -> (Self, RequestHandlerFuture) {
+    pub(crate) fn new(request_body: Body<'b>) -> (Self, RequestHandlerFuture) {
         let (sender, receiver) = crossbeam_channel::bounded(1);
         let shared = Arc::new(Shared {
             id: AtomicCell::new(usize::max_value()),
@@ -241,7 +241,7 @@ impl RequestHandler {
     }
 }
 
-impl curl::easy::Handler for RequestHandler {
+impl<'b> curl::easy::Handler for RequestHandler<'b> {
     /// Gets called by curl for each line of data in the HTTP response header.
     fn header(&mut self, data: &[u8]) -> bool {
         // Abort the request if it has been canceled.
@@ -398,7 +398,7 @@ impl curl::easy::Handler for RequestHandler {
     }
 }
 
-impl fmt::Debug for RequestHandler {
+impl fmt::Debug for RequestHandler<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "RequestHandler({:?})", self.shared.id)
     }

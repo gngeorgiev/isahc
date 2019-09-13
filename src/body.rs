@@ -21,12 +21,14 @@ use std::task::{Context, Poll};
 /// Since the entire request life-cycle in Isahc is asynchronous, bodies must
 /// also be asynchronous. You can create a body from anything that implements
 /// [`AsyncRead`], which [`Body`] itself also implements.
-pub struct Body(Inner);
+pub struct Body<'b>(Inner<'b>);
 
 /// All possible body implementations.
-enum Inner {
+enum Inner<'b> {
     /// An empty body.
     Empty,
+
+    Borrowed(Cursor<&'b [u8]>),
 
     /// A body stored in memory.
     Bytes(Cursor<Bytes>),
@@ -35,14 +37,7 @@ enum Inner {
     AsyncRead(Pin<Box<dyn AsyncRead + Send>>, Option<u64>),
 }
 
-impl Body {
-    /// Create a new empty body.
-    ///
-    /// An empty body will have a known length of 0 bytes.
-    pub const fn empty() -> Self {
-        Body(Inner::Empty)
-    }
-
+impl Body<'static> {
     /// Create a new body from bytes stored in memory.
     ///
     /// The body will have a known length equal to the number of bytes given.
@@ -69,6 +64,15 @@ impl Body {
     /// request.
     pub fn reader_sized(read: impl AsyncRead + Send + 'static, length: u64) -> Self {
         Body(Inner::AsyncRead(Box::pin(read), Some(length)))
+    }
+}
+
+impl<'b> Body<'b> {
+    /// Create a new empty body.
+    ///
+    /// An empty body will have a known length of 0 bytes.
+    pub const fn empty() -> Self {
+        Body(Inner::Empty)
     }
 
     /// Report if this body is empty.
@@ -128,7 +132,7 @@ impl Body {
     /// this method will return an empty string next call. If this body supports
     /// seeking, you can seek to the beginning of the body if you need to call
     /// this method again later.
-    pub fn text_async(&mut self) -> Text<'_, Body> {
+    pub fn text_async(&mut self) -> Text<'_, Body<'b>> {
         Text::new(self)
     }
 
@@ -141,13 +145,13 @@ impl Body {
     }
 }
 
-impl Read for Body {
+impl<'b> Read for Body<'b> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         AsyncReadExt::read(self, buf).join()
     }
 }
 
-impl AsyncRead for Body {
+impl<'b> AsyncRead for Body<'b> {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -161,49 +165,49 @@ impl AsyncRead for Body {
     }
 }
 
-impl Default for Body {
+impl<'b> Default for Body<'b> {
     fn default() -> Self {
         Self::empty()
     }
 }
 
-impl From<()> for Body {
+impl<'b> From<()> for Body<'b> {
     fn from(_: ()) -> Self {
         Self::empty()
     }
 }
 
-impl From<Vec<u8>> for Body {
+impl From<Vec<u8>> for Body<'static> {
     fn from(body: Vec<u8>) -> Self {
         Self::bytes(body)
     }
 }
 
-impl From<&'static [u8]> for Body {
-    fn from(body: &'static [u8]) -> Self {
-        Bytes::from_static(body).into()
+impl<'b> From<&'b [u8]> for Body<'b> {
+    fn from(body: &'b [u8]) -> Self {
+        Body(Inner::Borrowed(Cursor::new(body)))
     }
 }
 
-impl From<Bytes> for Body {
+impl From<Bytes> for Body<'static> {
     fn from(body: Bytes) -> Self {
         Self::bytes(body)
     }
 }
 
-impl From<String> for Body {
+impl From<String> for Body<'static> {
     fn from(body: String) -> Self {
         body.into_bytes().into()
     }
 }
 
-impl From<&'static str> for Body {
-    fn from(body: &'static str) -> Self {
+impl<'b> From<&'b str> for Body<'b> {
+    fn from(body: &'b str) -> Self {
         body.as_bytes().into()
     }
 }
 
-impl<T: Into<Body>> From<Option<T>> for Body {
+impl<'b, T: Into<Body<'b>>> From<Option<T>> for Body<'b> {
     fn from(body: Option<T>) -> Self {
         match body {
             Some(body) => body.into(),
@@ -212,7 +216,7 @@ impl<T: Into<Body>> From<Option<T>> for Body {
     }
 }
 
-impl fmt::Debug for Body {
+impl<'b> fmt::Debug for Body<'b> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.len() {
             Some(len) => write!(f, "Body({})", len),

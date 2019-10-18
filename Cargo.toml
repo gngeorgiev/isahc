@@ -40,6 +40,10 @@ log = "0.4"
 slab = "0.4"
 sluice = "0.4.2"
 
+[patch.crates-io]
+curl = { git = 'https://github.com/gngeorgiev/curl-rust' }
+curl-sys = { git = 'https://github.com/gngeorgiev/curl-rust' }
+
 [dependencies.chrono]
 version = "0.4"
 optional = true
